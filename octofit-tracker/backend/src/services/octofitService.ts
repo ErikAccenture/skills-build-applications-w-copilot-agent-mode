@@ -70,11 +70,70 @@ export async function createTeam(input: unknown) {
 }
 
 export async function getLeaderboard() {
-  return [];
+  const teams = await Team.aggregate<{
+    teamName: string;
+    totalPoints: number;
+  }>([
+    {
+      $lookup: {
+        from: Activity.collection.name,
+        localField: '_id',
+        foreignField: 'team',
+        as: 'activities',
+      },
+    },
+    {
+      $addFields: {
+        totalPoints: { $sum: '$activities.points' },
+      },
+    },
+    { $sort: { totalPoints: -1, name: 1 } },
+    { $project: { _id: 0, teamName: '$name', totalPoints: 1 } },
+  ]);
+  return teams.map((team, index) => ({ ...team, rank: index + 1 }));
 }
 
-export async function suggestWorkouts(_userEmail: string) {
-  return Workout.find().limit(1).lean();
+export async function suggestWorkouts(userEmail: string) {
+  const user = await User.findOne({ email: userEmail.trim().toLowerCase() })
+    .select('_id fitnessGoal')
+    .lean();
+  if (!user) throw Object.assign(new Error('User not found'), { status: 404 });
+
+  const recentActivity = await Activity.findOne({ user: user._id })
+    .sort({ occurredAt: -1 })
+    .select('type')
+    .lean();
+  const activityFocusByType: Record<string, string> = {
+    cycle: 'endurance',
+    run: 'endurance',
+    swim: 'endurance',
+    walk: 'endurance',
+    strength: 'strength',
+    weights: 'strength',
+    mobility: 'mobility',
+    yoga: 'mobility',
+  };
+  const activityFocus = recentActivity
+    ? activityFocusByType[recentActivity.type.toLowerCase()] ?? recentActivity.type.toLowerCase()
+    : undefined;
+  const focusPreferences = [...new Set([user.fitnessGoal.toLowerCase(), activityFocus].filter(
+    (focus): focus is string => Boolean(focus),
+  ))];
+  if (focusPreferences.length === 0) return [];
+
+  const workouts = await Workout.find({ focus: { $in: focusPreferences } }).lean();
+  workouts.sort(
+    (left, right) =>
+      focusPreferences.indexOf(left.focus.toLowerCase()) -
+      focusPreferences.indexOf(right.focus.toLowerCase()),
+  );
+  return workouts.map((workout) => ({
+    ...workout,
+    reason:
+      activityFocus && workout.focus.toLowerCase() === activityFocus
+        ? `Recommended based on your recent ${recentActivity?.type} activity.`
+        : `Recommended to support your ${user.fitnessGoal} fitness goal.`,
+  }));
 }
 
 export { User };
