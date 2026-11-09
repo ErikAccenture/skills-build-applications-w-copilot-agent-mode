@@ -40,6 +40,13 @@ describe('OctoFit API contract', () => {
       expect(response.status).toBeGreaterThanOrEqual(400);
       expect(response.status).toBeLessThan(500);
     }
+    const fractionalMinutes = await request(app).post('/api/activities').send({
+      userId: user._id.toString(),
+      teamId: team._id.toString(),
+      type: 'run',
+      minutes: 0.5,
+    });
+    expect(fractionalMinutes.status).toBe(400);
     expect(await Activity.countDocuments()).toBe(0);
     const created = await request(app).post('/api/activities').send({ userId: user._id.toString(), teamId: team._id.toString(), type: 'run', minutes: 30 });
     expect(created.status).toBe(201);
